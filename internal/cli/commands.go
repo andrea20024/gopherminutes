@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/andrea20024/goferminutes2/internal/config"
@@ -50,8 +51,10 @@ func startCmd(cfg *config.Config) *cobra.Command {
 			if userIDStr == "" {
 				userIDStr = "1"
 			}
-			userID := 1
-			fmt.Sscanf(userIDStr, "%d", &userID)
+			userID, err := parseInt(userIDStr, "user-id")
+			if err != nil {
+				return err
+			}
 
 			user, err := h.UserRepo.GetUserByID(cmd.Context(), userID)
 			if err == nil {
@@ -116,8 +119,10 @@ func loadCmd(cfg *config.Config) *cobra.Command {
 			if userIDStr == "" {
 				userIDStr = "1"
 			}
-			userID := 1
-			fmt.Sscanf(userIDStr, "%d", &userID)
+			userID, err := parseInt(userIDStr, "user-id")
+			if err != nil {
+				return err
+			}
 
 			// Find user by ID (CLI mode: user_id matches the CLI flag)
 			user, err := h.UserRepo.GetUserByID(cmd.Context(), userID)
@@ -160,8 +165,10 @@ func listCmd(cfg *config.Config) *cobra.Command {
 			if userIDStr == "" {
 				userIDStr = "1"
 			}
-			userID := 1
-			fmt.Sscanf(userIDStr, "%d", &userID)
+			userID, err := parseInt(userIDStr, "user-id")
+			if err != nil {
+				return err
+			}
 
 			meetings, err := h.Service.ListMeetings(cmd.Context(), userID)
 			if err != nil {
@@ -199,15 +206,19 @@ func statusCmd(cfg *config.Config) *cobra.Command {
 				return err
 			}
 
-			var meetingID int
-			fmt.Sscanf(args[0], "%d", &meetingID)
+			meetingID, err := parseInt(args[0], "meeting ID")
+			if err != nil {
+				return err
+			}
 
 			userIDStr, _ := cmd.Flags().GetString("user-id")
 			if userIDStr == "" {
 				userIDStr = "1"
 			}
-			userID := 1
-			fmt.Sscanf(userIDStr, "%d", &userID)
+			userID, err := parseInt(userIDStr, "user-id")
+			if err != nil {
+				return err
+			}
 
 			meeting, err := h.Service.GetMeeting(cmd.Context(), meetingID, userID)
 			if err != nil {
@@ -238,15 +249,19 @@ func getCmd(cfg *config.Config) *cobra.Command {
 				return err
 			}
 
-			var meetingID int
-			fmt.Sscanf(args[0], "%d", &meetingID)
+			meetingID, err := parseInt(args[0], "meeting ID")
+			if err != nil {
+				return err
+			}
 
 			userIDStr, _ := cmd.Flags().GetString("user-id")
 			if userIDStr == "" {
 				userIDStr = "1"
 			}
-			userID := 1
-			fmt.Sscanf(userIDStr, "%d", &userID)
+			userID, err := parseInt(userIDStr, "user-id")
+			if err != nil {
+				return err
+			}
 
 			meeting, err := h.Service.GetMeeting(cmd.Context(), meetingID, userID)
 			if err != nil {
@@ -288,8 +303,10 @@ func findCmd(cfg *config.Config) *cobra.Command {
 			if userIDStr == "" {
 				userIDStr = "1"
 			}
-			userID := 1
-			fmt.Sscanf(userIDStr, "%d", &userID)
+			userID, err := parseInt(userIDStr, "user-id")
+			if err != nil {
+				return err
+			}
 
 			meetings, err := h.Service.SearchMeetings(cmd.Context(), userID, keyword)
 			if err != nil {
@@ -333,8 +350,10 @@ func chatCmd(cfg *config.Config) *cobra.Command {
 			if userIDStr == "" {
 				userIDStr = "1"
 			}
-			userID := 1
-			fmt.Sscanf(userIDStr, "%d", &userID)
+			userID, err := parseInt(userIDStr, "user-id")
+			if err != nil {
+				return err
+			}
 
 			var meetingPtr *int
 			if meetingID > 0 {
@@ -366,15 +385,19 @@ func retryCmd(cfg *config.Config) *cobra.Command {
 				return err
 			}
 
-			var meetingID int
-			fmt.Sscanf(args[0], "%d", &meetingID)
+			meetingID, err := parseInt(args[0], "meeting ID")
+			if err != nil {
+				return err
+			}
 
 			userIDStr, _ := cmd.Flags().GetString("user-id")
 			if userIDStr == "" {
 				userIDStr = "1"
 			}
-			userID := 1
-			fmt.Sscanf(userIDStr, "%d", &userID)
+			userID, err := parseInt(userIDStr, "user-id")
+			if err != nil {
+				return err
+			}
 
 			meeting, err := h.Service.RetryProcessing(cmd.Context(), meetingID, userID)
 			if err != nil {
@@ -398,15 +421,19 @@ func deleteCmd(cfg *config.Config) *cobra.Command {
 				return err
 			}
 
-			var meetingID int
-			fmt.Sscanf(args[0], "%d", &meetingID)
+			meetingID, err := parseInt(args[0], "meeting ID")
+			if err != nil {
+				return err
+			}
 
 			userIDStr, _ := cmd.Flags().GetString("user-id")
 			if userIDStr == "" {
 				userIDStr = "1"
 			}
-			userID := 1
-			fmt.Sscanf(userIDStr, "%d", &userID)
+			userID, err := parseInt(userIDStr, "user-id")
+			if err != nil {
+				return err
+			}
 
 			// Verify the meeting exists and belongs to the user
 			_, err = h.Service.GetMeeting(cmd.Context(), meetingID, userID)
@@ -443,15 +470,19 @@ func getAudioCmd(cfg *config.Config) *cobra.Command {
 				return service.ErrGridFSNotConfigured
 			}
 
-			var meetingID int
-			fmt.Sscanf(args[0], "%d", &meetingID)
+			meetingID, err := parseInt(args[0], "meeting ID")
+			if err != nil {
+				return err
+			}
 
 			userIDStr, _ := cmd.Flags().GetString("user-id")
 			if userIDStr == "" {
 				userIDStr = "1"
 			}
-			userID := 1
-			fmt.Sscanf(userIDStr, "%d", &userID)
+			userID, err := parseInt(userIDStr, "user-id")
+			if err != nil {
+				return err
+			}
 
 			meeting, err := h.Service.GetMeeting(cmd.Context(), meetingID, userID)
 			if err != nil {
@@ -482,6 +513,18 @@ func getAudioCmd(cfg *config.Config) *cobra.Command {
 
 	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Output file path (default: meeting_<id>_audio.mp3)")
 	return cmd
+}
+
+// parseInt parses a string into an integer, returning a descriptive error.
+func parseInt(s, field string) (int, error) {
+	if s == "" {
+		return 0, fmt.Errorf("missing required value for %s", field)
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid value for %s: %q is not a valid integer", field, s)
+	}
+	return n, nil
 }
 
 func truncate(s string, maxLen int) string {

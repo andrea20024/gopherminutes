@@ -141,8 +141,11 @@ func (r *MeetingRepo) UpdateMeetingStatus(ctx context.Context, meetingID int, st
 		return fmt.Errorf("update task status: %w", err)
 	}
 
-	rows, _ := res.RowsAffected()
-	if rows == 0 {
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
 		return fmt.Errorf("no task found for meeting %d", meetingID)
 	}
 	return nil

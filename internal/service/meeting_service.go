@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/andrea20024/goferminutes2/internal/ai"
@@ -68,6 +67,7 @@ type MeetingRepository interface {
 
 // MeetingService orchestrates meeting processing: transcription, summarization.
 type MeetingService struct {
+	mu           sync.Mutex
 	meetingRepo  MeetingRepository
 	userRepo     *storage.UserRepo
 	speechClient interfaces.SpeechClient
@@ -78,7 +78,9 @@ type MeetingService struct {
 	cancel       context.CancelFunc
 	ctx          context.Context
 	wg           sync.WaitGroup
-	stopped      atomic.Bool // atomic flag to prevent panic on closed channel send
+	closing      chan struct{}
+	stopped      bool
+	taskTimeout  time.Duration
 }
 
 // NewMeetingService creates a new MeetingService.
@@ -88,6 +90,7 @@ func NewMeetingService(
 	speechClient interfaces.SpeechClient,
 	llmClient interfaces.LLMClient,
 	gridFS *mongo.GridFSClient,
+	opts ...func(*MeetingService),
 ) *MeetingService {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -101,13 +104,19 @@ func NewMeetingService(
 		semaphore:    make(chan struct{}, 3),
 		cancel:       cancel,
 		ctx:          ctx,
+		closing:      make(chan struct{}),
+		taskTimeout:  10 * 60 * time.Second,
+	}
+
+	for _, opt := range opts {
+		opt(s)
 	}
 
 	s.wg.Add(1)
 	go s.consumeLoop()
 
 	if logger.Sugar() != nil {
-		logger.Sugar().Infow("meeting service started", "queue_capacity", 100, "max_workers", 3)
+		logger.Sugar().Infow("meeting service started", "queue_capacity", len(s.taskQueue), "max_workers", cap(s.semaphore))
 	}
 
 	return s
@@ -117,9 +126,17 @@ func NewMeetingService(
 func (s *MeetingService) consumeLoop() {
 	defer s.wg.Done()
 
-	for task := range s.taskQueue {
-		s.wg.Add(1)
-		go s.processTask(task)
+	for {
+		select {
+		case task, ok := <-s.taskQueue:
+			if !ok {
+				return
+			}
+			s.wg.Add(1)
+			go s.processTask(task)
+		case <-s.closing:
+			return
+		}
 	}
 }
 
@@ -129,7 +146,7 @@ func (s *MeetingService) processTask(task *TaskContext) {
 	s.semaphore <- struct{}{}
 	defer func() { <-s.semaphore }()
 
-	ctx, cancel := context.WithTimeout(s.ctx, 10*60*time.Second)
+	ctx, cancel := context.WithTimeout(s.ctx, s.taskTimeout)
 	defer cancel()
 
 	if logger.Sugar() != nil {
@@ -218,7 +235,16 @@ func (s *MeetingService) failTask(ctx context.Context, task *TaskContext, errMsg
 	}
 
 	errStr := errMsg
-	_ = s.meetingRepo.UpdateMeetingStatus(ctx, task.MeetingID, storage.StatusFailed, &errStr)
+	dCtx, dCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer dCancel()
+	if err := s.meetingRepo.UpdateMeetingStatus(dCtx, task.MeetingID, storage.StatusFailed, &errStr); err != nil {
+		if logger.Sugar() != nil {
+			logger.Sugar().Errorw("failed to persist failure status",
+				"meeting_id", task.MeetingID,
+				"error", err,
+			)
+		}
+	}
 }
 
 // StartProcessing creates a meeting and enqueues it for processing.
@@ -269,15 +295,21 @@ func (s *MeetingService) StartProcessing(ctx context.Context, userID int, filePa
 	}
 
 	// Check if service is stopped to prevent panic on closed channel
-	if s.stopped.Load() {
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
 		return nil, nil, ErrServiceShuttingDown
 	}
-
 	select {
 	case s.taskQueue <- taskCtx:
+		s.mu.Unlock()
 		return meeting, task, nil
-	case <-s.ctx.Done():
-		return nil, nil, fmt.Errorf("%w: %w", ErrServiceShuttingDown, s.ctx.Err())
+	case <-ctx.Done():
+		s.mu.Unlock()
+		return nil, nil, fmt.Errorf("context cancelled: %w", ctx.Err())
+	case <-s.closing:
+		s.mu.Unlock()
+		return nil, nil, ErrServiceShuttingDown
 	}
 }
 
@@ -372,15 +404,21 @@ func (s *MeetingService) RetryProcessing(ctx context.Context, meetingID, userID 
 	}
 
 	// Check if service is stopped to prevent panic on closed channel
-	if s.stopped.Load() {
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
 		return nil, ErrServiceShuttingDown
 	}
-
 	select {
 	case s.taskQueue <- taskCtx:
+		s.mu.Unlock()
 		return meeting, nil
-	case <-s.ctx.Done():
-		return nil, fmt.Errorf("%w: %w", ErrServiceShuttingDown, s.ctx.Err())
+	case <-ctx.Done():
+		s.mu.Unlock()
+		return nil, fmt.Errorf("context cancelled: %w", ctx.Err())
+	case <-s.closing:
+		s.mu.Unlock()
+		return nil, ErrServiceShuttingDown
 	}
 }
 
@@ -390,10 +428,14 @@ func (s *MeetingService) Stop() {
 		logger.Sugar().Infow("stopping meeting service")
 	}
 
-	s.stopped.Store(true)
-	close(s.taskQueue)
-	s.wg.Wait()
 	s.cancel()
+
+	s.mu.Lock()
+	s.stopped = true
+	close(s.closing)
+	s.mu.Unlock()
+
+	s.wg.Wait()
 
 	if logger.Sugar() != nil {
 		logger.Sugar().Infow("meeting service stopped")
@@ -429,5 +471,35 @@ func CreateLLMClient(cfg *config.Config) interfaces.LLMClient {
 			logger.Sugar().Infow("using mock LLM client", "component", "ai")
 		}
 		return ai.NewMockLLMClient()
+	}
+}
+
+// WithWorkers sets the max number of concurrent processing workers.
+func WithWorkers(n int) func(*MeetingService) {
+	return func(s *MeetingService) {
+		if n <= 0 {
+			panic("workers must be > 0")
+		}
+		s.semaphore = make(chan struct{}, n)
+	}
+}
+
+// WithQueueCapacity sets the task queue capacity.
+func WithQueueCapacity(n int) func(*MeetingService) {
+	return func(s *MeetingService) {
+		if n <= 0 {
+			panic("queue capacity must be > 0")
+		}
+		s.taskQueue = make(chan *TaskContext, n)
+	}
+}
+
+// WithTaskTimeout sets the timeout for each processing task.
+func WithTaskTimeout(d time.Duration) func(*MeetingService) {
+	return func(s *MeetingService) {
+		if d <= 0 {
+			panic("task timeout must be > 0")
+		}
+		s.taskTimeout = d
 	}
 }

@@ -178,4 +178,3 @@ func (c *GridFSClient) FileExists(ctx context.Context, fileID interface{}) bool 
 
 	return count > 0
 }
-

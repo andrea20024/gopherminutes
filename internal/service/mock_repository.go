@@ -86,6 +86,7 @@ func (m *MockMeetingRepo) CreateMeetingWithTask(ctx context.Context, userID int,
 		ID:        id,
 		UserID:    userID,
 		FileName:  fileName,
+		Status:    storage.StatusCreated,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -294,6 +295,7 @@ func (m *MockMeetingRepo) GetMeetingByID(meetingID int) *storage.Meeting {
 		cpy := *meeting
 		if task := m.latestTaskForMeeting(meetingID); task != nil {
 			cpy.Status = task.Status
+			cpy.ErrorMessage = task.ErrorMessage
 		}
 		return &cpy
 	}
