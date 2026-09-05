@@ -17,6 +17,7 @@ import (
 	"github.com/andrea20024/goferminutes2/internal/mongo"
 	"github.com/andrea20024/goferminutes2/internal/speech"
 	"github.com/andrea20024/goferminutes2/internal/storage"
+	"golang.org/x/sync/errgroup"
 )
 
 // Handlers holds all dependencies for CLI commands.
@@ -67,19 +68,16 @@ type MeetingRepository interface {
 
 // MeetingService orchestrates meeting processing: transcription, summarization.
 type MeetingService struct {
-	mu           sync.Mutex
-	meetingRepo  MeetingRepository
-	userRepo     *storage.UserRepo
+	mu          sync.Mutex
+	meetingRepo MeetingRepository
+	userRepo    *storage.UserRepo
 	speechClient interfaces.SpeechClient
 	llmClient    interfaces.LLMClient
 	gridFS       *mongo.GridFSClient
 	taskQueue    chan *TaskContext
-	semaphore    chan struct{}
-	cancel       context.CancelFunc
-	ctx          context.Context
-	wg           sync.WaitGroup
-	closing      chan struct{}
-	stopped      bool
+	eg           *errgroup.Group
+	egCtx        context.Context
+	egCancel     context.CancelFunc
 	taskTimeout  time.Duration
 }
 
@@ -102,12 +100,14 @@ func NewMeetingService(
 		llmClient:    llmClient,
 		gridFS:       gridFS,
 		taskQueue:    make(chan *TaskContext, 100),
-		semaphore:    make(chan struct{}, 3),
-		cancel:       cancel,
-		ctx:          ctx,
-		closing:      make(chan struct{}),
+		egCtx:        ctx,
+		egCancel:     cancel,
 		taskTimeout:  10 * 60 * time.Second,
 	}
+
+	// Initialize errgroup BEFORE applying options so WithWorkers can call SetLimit
+	s.eg, s.egCtx = errgroup.WithContext(s.egCtx)
+	s.eg.SetLimit(3)
 
 	var applyErr error
 	for _, opt := range opts {
@@ -120,41 +120,42 @@ func NewMeetingService(
 		return nil, fmt.Errorf("apply options: %w", applyErr)
 	}
 
-	s.wg.Add(1)
-	go s.consumeLoop()
+	s.eg.Go(func() error {
+		s.consumeLoop()
+		return nil
+	})
 
 	if logger.Sugar() != nil {
-		logger.Sugar().Infow("meeting service started", "queue_capacity", len(s.taskQueue), "max_workers", cap(s.semaphore))
+		logger.Sugar().Infow("meeting service started", "queue_capacity", cap(s.taskQueue), "max_workers", 3)
 	}
 
 	return s, nil
 }
 
-// consumeLoop reads tasks from the queue and processes them.
+// consumeLoop reads tasks from the queue and dispatches them via errgroup.
 func (s *MeetingService) consumeLoop() {
-	defer s.wg.Done()
-
 	for {
 		select {
 		case task, ok := <-s.taskQueue:
 			if !ok {
 				return
 			}
-			s.wg.Add(1)
-			go s.processTask(task)
-		case <-s.closing:
+			// errgroup.Go blocks when the concurrency limit is reached,
+			// replacing the manual semaphore.
+			taskCtx := task // capture for closure
+			s.eg.Go(func() error {
+				s.runTask(taskCtx)
+				return nil
+			})
+		case <-s.egCtx.Done():
 			return
 		}
 	}
 }
 
-// processTask handles the full processing pipeline for a meeting.
-func (s *MeetingService) processTask(task *TaskContext) {
-	defer s.wg.Done()
-	s.semaphore <- struct{}{}
-	defer func() { <-s.semaphore }()
-
-	ctx, cancel := context.WithTimeout(s.ctx, s.taskTimeout)
+// runTask handles the full processing pipeline for a meeting.
+func (s *MeetingService) runTask(task *TaskContext) {
+	ctx, cancel := context.WithTimeout(s.egCtx, s.taskTimeout)
 	defer cancel()
 
 	if logger.Sugar() != nil {
@@ -304,18 +305,11 @@ func (s *MeetingService) StartProcessing(ctx context.Context, userID int, filePa
 
 	// Check if service is stopped to prevent panic on closed channel
 	s.mu.Lock()
-	if s.stopped {
-		s.mu.Unlock()
-		return nil, nil, ErrServiceShuttingDown
-	}
 	select {
 	case s.taskQueue <- taskCtx:
 		s.mu.Unlock()
 		return meeting, task, nil
-	case <-ctx.Done():
-		s.mu.Unlock()
-		return nil, nil, fmt.Errorf("context cancelled: %w", ctx.Err())
-	case <-s.closing:
+	case <-s.egCtx.Done():
 		s.mu.Unlock()
 		return nil, nil, ErrServiceShuttingDown
 	}
@@ -413,18 +407,11 @@ func (s *MeetingService) RetryProcessing(ctx context.Context, meetingID, userID 
 
 	// Check if service is stopped to prevent panic on closed channel
 	s.mu.Lock()
-	if s.stopped {
-		s.mu.Unlock()
-		return nil, ErrServiceShuttingDown
-	}
 	select {
 	case s.taskQueue <- taskCtx:
 		s.mu.Unlock()
 		return meeting, nil
-	case <-ctx.Done():
-		s.mu.Unlock()
-		return nil, fmt.Errorf("context cancelled: %w", ctx.Err())
-	case <-s.closing:
+	case <-s.egCtx.Done():
 		s.mu.Unlock()
 		return nil, ErrServiceShuttingDown
 	}
@@ -436,14 +423,14 @@ func (s *MeetingService) Stop() {
 		logger.Sugar().Infow("stopping meeting service")
 	}
 
-	s.cancel()
+	// Close the queue to stop consumeLoop
+	close(s.taskQueue)
 
-	s.mu.Lock()
-	s.stopped = true
-	close(s.closing)
-	s.mu.Unlock()
+	// Cancel context to signal all in-flight tasks
+	s.egCancel()
 
-	s.wg.Wait()
+	// Wait for all goroutines to finish
+	_ = s.eg.Wait()
 
 	if logger.Sugar() != nil {
 		logger.Sugar().Infow("meeting service stopped")
@@ -488,7 +475,7 @@ func WithWorkers(n int) func(*MeetingService) error {
 		if n <= 0 {
 			return fmt.Errorf("workers must be > 0, got %d", n)
 		}
-		s.semaphore = make(chan struct{}, n)
+		s.eg.SetLimit(n)
 		return nil
 	}
 }
