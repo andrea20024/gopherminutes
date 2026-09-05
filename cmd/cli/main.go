@@ -167,7 +167,16 @@ func initApp(cfg *config.Config) (*service.Handlers, error) {
 	}
 
 	// Create service
-	meetingService := service.NewMeetingService(meetingRepo, userRepo, speechClient, llmClient, gridFSClient)
+	meetingService, err := service.NewMeetingService(
+		meetingRepo,
+		userRepo,
+		speechClient,
+		llmClient,
+		gridFSClient,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create meeting service: %w", err)
+	}
 	globalService = meetingService
 
 	// Create and store handlers

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,7 +21,10 @@ func setupTestService(t *testing.T) (*MeetingService, *MockMeetingRepo, *speech.
 	mockRepo := NewMockMeetingRepo()
 	speechClient := speech.NewMockSpeechClient()
 	llmClient := ai.NewMockLLMClient()
-	svc := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	svc, err := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
 	t.Cleanup(func() { svc.Stop() })
 	return svc, mockRepo, speechClient, llmClient
 }
@@ -469,7 +473,10 @@ func TestMeetingService_ContextCancellation(t *testing.T) {
 		cancel()
 	}()
 
-	svc := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	svc, err := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
 	defer svc.Stop()
 
 	meeting, _, err := svc.StartProcessing(ctx, 1, "test.mp3", []byte("data"), "audio/mpeg")
@@ -500,7 +507,10 @@ func TestMeetingService_SemaphoreLimit(t *testing.T) {
 	speechClient := speech.NewCountingSpeechClient(500 * time.Millisecond)
 	llmClient := ai.NewMockLLMClient()
 
-	svc := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	svc, err := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
 	defer svc.Stop()
 
 	// Enqueue 10 tasks — semaphore should limit to 3 concurrent
@@ -546,7 +556,10 @@ func TestMeetingService_ContextTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	svc := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	svc, err := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
 	defer svc.Stop()
 
 	meeting, _, err := svc.StartProcessing(ctx, 1, "test.mp3", []byte("data"), "audio/mpeg")
@@ -577,7 +590,10 @@ func TestMeetingService_GracefulShutdown_NoGoroutineLeak(t *testing.T) {
 	speechClient := speech.NewSlowMockSpeechClient(1 * time.Second)
 	llmClient := ai.NewSlowMockLLMClient(1 * time.Second)
 
-	svc := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	svc, err := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
 
 	// Enqueue 5 tasks
 	for i := 0; i < 5; i++ {
@@ -610,13 +626,16 @@ func TestMeetingService_ShutdownStopsAcceptingTasks(t *testing.T) {
 	speechClient := speech.NewMockSpeechClient()
 	llmClient := ai.NewMockLLMClient()
 
-	svc := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	svc, err := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
 
 	// Stop service
 	svc.Stop()
 
 	// Try to enqueue — should fail
-	_, _, err := svc.StartProcessing(context.Background(), 1, "test.mp3", []byte("data"), "audio/mpeg")
+	_, _, err = svc.StartProcessing(context.Background(), 1, "test.mp3", []byte("data"), "audio/mpeg")
 	if err == nil {
 		t.Fatal("expected error when enqueuing to stopped service, got nil")
 	}
@@ -630,7 +649,10 @@ func TestMeetingService_SpeechClientError(t *testing.T) {
 	}
 	llmClient := ai.NewMockLLMClient()
 
-	svc := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	svc, err := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
 	defer svc.Stop()
 
 	meeting, _, err := svc.StartProcessing(context.Background(), 1, "test.mp3", []byte("data"), "audio/mpeg")
@@ -662,7 +684,10 @@ func TestMeetingService_LLMClientError(t *testing.T) {
 		SummaryError: fmt.Errorf("LLM service rate limited: 429 Too Many Requests"),
 	}
 
-	svc := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	svc, err := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
 	defer svc.Stop()
 
 	meeting, _, err := svc.StartProcessing(context.Background(), 1, "test.mp3", []byte("data"), "audio/mpeg")
@@ -698,7 +723,10 @@ func TestMeetingService_SuccessfulRetry(t *testing.T) {
 	failingSpeech := &speech.MockSpeechClient{
 		Error: fmt.Errorf("speech service temporarily unavailable"),
 	}
-	svc := NewMeetingService(mockRepo, nil, failingSpeech, ai.NewMockLLMClient(), nil)
+	svc, err := NewMeetingService(mockRepo, nil, failingSpeech, ai.NewMockLLMClient(), nil)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
 
 	// Start processing — will fail
 	meeting, _, err := svc.StartProcessing(context.Background(), 1, "test.mp3", []byte("data"), "audio/mpeg")
@@ -723,7 +751,10 @@ func TestMeetingService_SuccessfulRetry(t *testing.T) {
 
 	okSpeech := speech.NewMockSpeechClient()
 	okLLM := ai.NewMockLLMClient()
-	svc2 := NewMeetingService(mockRepo, nil, okSpeech, okLLM, nil)
+	svc2, err := NewMeetingService(mockRepo, nil, okSpeech, okLLM, nil)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
 	defer svc2.Stop()
 
 	retried, err := svc2.RetryProcessing(context.Background(), meeting.ID, 1)
@@ -759,7 +790,10 @@ func TestMeetingService_RetryNonFailedMeeting(t *testing.T) {
 	speechClient := speech.NewMockSpeechClient()
 	llmClient := ai.NewMockLLMClient()
 
-	svc := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	svc, err := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
 	defer svc.Stop()
 
 	meeting, _, err := svc.StartProcessing(context.Background(), 1, "test.mp3", []byte("data"), "audio/mpeg")
@@ -787,4 +821,68 @@ func TestMeetingService_RetryNonFailedMeeting(t *testing.T) {
 		t.Errorf("expected ErrRetryOnNonFailedMeeting, got: %v", err)
 	}
 	t.Logf("retry correctly rejected: %v", err)
+}
+
+func TestNewMeetingService_InvalidOptions(t *testing.T) {
+	mockRepo := NewMockMeetingRepo()
+	speechClient := speech.NewMockSpeechClient()
+	llmClient := ai.NewMockLLMClient()
+
+	// WithWorkers(0) should return error, not panic
+	_, err := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil, WithWorkers(0))
+	if err == nil {
+		t.Fatal("expected error for WithWorkers(0), got nil")
+	}
+	if !strings.Contains(err.Error(), "workers must be > 0") {
+		t.Errorf("expected 'workers must be > 0' error, got: %v", err)
+	}
+
+	// WithQueueCapacity(-1) should return error
+	_, err = NewMeetingService(mockRepo, nil, speechClient, llmClient, nil, WithQueueCapacity(-1))
+	if err == nil {
+		t.Fatal("expected error for WithQueueCapacity(-1), got nil")
+	}
+	if !strings.Contains(err.Error(), "queue capacity must be > 0") {
+		t.Errorf("expected 'queue capacity must be > 0' error, got: %v", err)
+	}
+
+	// WithTaskTimeout(0) should return error
+	_, err = NewMeetingService(mockRepo, nil, speechClient, llmClient, nil, WithTaskTimeout(0))
+	if err == nil {
+		t.Fatal("expected error for WithTaskTimeout(0), got nil")
+	}
+	if !strings.Contains(err.Error(), "task timeout must be > 0") {
+		t.Errorf("expected 'task timeout must be > 0' error, got: %v", err)
+	}
+}
+
+func TestNewMeetingService_ValidOptions(t *testing.T) {
+	mockRepo := NewMockMeetingRepo()
+	speechClient := speech.NewMockSpeechClient()
+	llmClient := ai.NewMockLLMClient()
+
+	svc, err := NewMeetingService(
+		mockRepo,
+		nil,
+		speechClient,
+		llmClient,
+		nil,
+		WithWorkers(5),
+		WithQueueCapacity(50),
+		WithTaskTimeout(30*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error with valid options: %v", err)
+	}
+	defer svc.Stop()
+
+	if cap(svc.semaphore) != 5 {
+		t.Errorf("expected semaphore capacity 5, got %d", cap(svc.semaphore))
+	}
+	if cap(svc.taskQueue) != 50 {
+		t.Errorf("expected task queue capacity 50, got %d", cap(svc.taskQueue))
+	}
+	if svc.taskTimeout != 30*time.Second {
+		t.Errorf("expected task timeout 30s, got %v", svc.taskTimeout)
+	}
 }

@@ -84,14 +84,15 @@ type MeetingService struct {
 }
 
 // NewMeetingService creates a new MeetingService.
+// Returns an error if functional options contain invalid values.
 func NewMeetingService(
 	meetingRepo MeetingRepository,
 	userRepo *storage.UserRepo,
 	speechClient interfaces.SpeechClient,
 	llmClient interfaces.LLMClient,
 	gridFS *mongo.GridFSClient,
-	opts ...func(*MeetingService),
-) *MeetingService {
+	opts ...func(*MeetingService) error,
+) (*MeetingService, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &MeetingService{
@@ -108,8 +109,15 @@ func NewMeetingService(
 		taskTimeout:  10 * 60 * time.Second,
 	}
 
+	var applyErr error
 	for _, opt := range opts {
-		opt(s)
+		if err := opt(s); err != nil {
+			applyErr = err
+		}
+	}
+	if applyErr != nil {
+		cancel()
+		return nil, fmt.Errorf("apply options: %w", applyErr)
 	}
 
 	s.wg.Add(1)
@@ -119,7 +127,7 @@ func NewMeetingService(
 		logger.Sugar().Infow("meeting service started", "queue_capacity", len(s.taskQueue), "max_workers", cap(s.semaphore))
 	}
 
-	return s
+	return s, nil
 }
 
 // consumeLoop reads tasks from the queue and processes them.
@@ -475,31 +483,34 @@ func CreateLLMClient(cfg *config.Config) interfaces.LLMClient {
 }
 
 // WithWorkers sets the max number of concurrent processing workers.
-func WithWorkers(n int) func(*MeetingService) {
-	return func(s *MeetingService) {
+func WithWorkers(n int) func(*MeetingService) error {
+	return func(s *MeetingService) error {
 		if n <= 0 {
-			panic("workers must be > 0")
+			return fmt.Errorf("workers must be > 0, got %d", n)
 		}
 		s.semaphore = make(chan struct{}, n)
+		return nil
 	}
 }
 
 // WithQueueCapacity sets the task queue capacity.
-func WithQueueCapacity(n int) func(*MeetingService) {
-	return func(s *MeetingService) {
+func WithQueueCapacity(n int) func(*MeetingService) error {
+	return func(s *MeetingService) error {
 		if n <= 0 {
-			panic("queue capacity must be > 0")
+			return fmt.Errorf("queue capacity must be > 0, got %d", n)
 		}
 		s.taskQueue = make(chan *TaskContext, n)
+		return nil
 	}
 }
 
 // WithTaskTimeout sets the timeout for each processing task.
-func WithTaskTimeout(d time.Duration) func(*MeetingService) {
-	return func(s *MeetingService) {
+func WithTaskTimeout(d time.Duration) func(*MeetingService) error {
+	return func(s *MeetingService) error {
 		if d <= 0 {
-			panic("task timeout must be > 0")
+			return fmt.Errorf("task timeout must be > 0, got %v", d)
 		}
 		s.taskTimeout = d
+		return nil
 	}
 }

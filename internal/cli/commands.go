@@ -486,7 +486,7 @@ func getAudioCmd(cfg *config.Config) *cobra.Command {
 
 			meeting, err := h.Service.GetMeeting(cmd.Context(), meetingID, userID)
 			if err != nil {
-				return err
+				return formatError(err)
 			}
 
 			if meeting.GridFSID == nil {
