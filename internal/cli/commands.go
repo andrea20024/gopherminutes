@@ -12,8 +12,17 @@ import (
 	"github.com/andrea20024/goferminutes2/internal/config"
 	"github.com/andrea20024/goferminutes2/internal/mongo"
 	"github.com/andrea20024/goferminutes2/internal/service"
+	"github.com/andrea20024/goferminutes2/internal/storage"
 	"github.com/spf13/cobra"
 )
+
+// Handlers holds all dependencies for CLI commands.
+type Handlers struct {
+	Service    *service.MeetingService
+	UserRepo   *storage.UserRepo
+	Repository *storage.Repository
+	GridFS     *mongo.GridFSClient
+}
 
 // RegisterCommands registers all CLI commands with the root command.
 func RegisterCommands(rootCmd *cobra.Command, cfg *config.Config) {
@@ -30,10 +39,10 @@ func RegisterCommands(rootCmd *cobra.Command, cfg *config.Config) {
 }
 
 // getHandlers lazily initializes and returns command handlers.
-var getHandlers func(cfg *config.Config) (*service.Handlers, error)
+var getHandlers func(cfg *config.Config) (*Handlers, error)
 
 // SetHandlersFactory sets the factory function for creating handlers.
-func SetHandlersFactory(f func(cfg *config.Config) (*service.Handlers, error)) {
+func SetHandlersFactory(f func(cfg *config.Config) (*Handlers, error)) {
 	getHandlers = f
 }
 

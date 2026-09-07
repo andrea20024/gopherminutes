@@ -3,9 +3,18 @@ package speech
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"sync/atomic"
 	"time"
 )
+
+// SpeechClient defines the interface for speech recognition services.
+// Implementations can be real (SaluteSpeech, Yandex) or mock for testing.
+type SpeechClient interface {
+	// Recognize transcribes audio data and returns the text transcript.
+	Recognize(ctx context.Context, data []byte, mime string) (string, error)
+}
 
 // MockSpeechClient returns a hardcoded transcript for testing.
 type MockSpeechClient struct {
@@ -32,9 +41,7 @@ func (m *MockSpeechClient) Recognize(ctx context.Context, data []byte, mime stri
 }
 
 // Compile-time interface check.
-var _ interface {
-	Recognize(ctx context.Context, data []byte, mime string) (string, error)
-} = (*MockSpeechClient)(nil)
+var _ SpeechClient = (*MockSpeechClient)(nil)
 
 // SlowMockSpeechClient returns a transcript after a configurable delay.
 // Useful for testing context cancellation and timeout behavior.
@@ -65,9 +72,7 @@ func (m *SlowMockSpeechClient) Recognize(ctx context.Context, data []byte, mime 
 }
 
 // Compile-time interface check.
-var _ interface {
-	Recognize(ctx context.Context, data []byte, mime string) (string, error)
-} = (*SlowMockSpeechClient)(nil)
+var _ SpeechClient = (*SlowMockSpeechClient)(nil)
 
 // CountingSpeechClient tracks max concurrent calls for semaphore verification.
 type CountingSpeechClient struct {
@@ -109,6 +114,23 @@ func (c *CountingSpeechClient) Recognize(ctx context.Context, data []byte, mime 
 }
 
 // Compile-time interface check.
-var _ interface {
-	Recognize(ctx context.Context, data []byte, mime string) (string, error)
-} = (*CountingSpeechClient)(nil)
+var _ SpeechClient = (*CountingSpeechClient)(nil)
+
+// SaluteSpeechClient implements SpeechClient for SaluteSpeech API.
+type SaluteSpeechClient struct {
+	apiKey string
+	client *http.Client
+}
+
+// NewSaluteSpeechClient creates a new SaluteSpeechClient.
+func NewSaluteSpeechClient(apiKey string) *SaluteSpeechClient {
+	return &SaluteSpeechClient{
+		apiKey: apiKey,
+		client: &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+// Recognize transcribes audio via SaluteSpeech API.
+func (c *SaluteSpeechClient) Recognize(ctx context.Context, data []byte, mime string) (string, error) {
+	return "", fmt.Errorf("SaluteSpeech integration not yet implemented")
+}

@@ -10,11 +10,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/andrea20024/goferminutes2/internal/ai"
 	"github.com/andrea20024/goferminutes2/internal/cli"
 	"github.com/andrea20024/goferminutes2/internal/config"
 	"github.com/andrea20024/goferminutes2/internal/logger"
 	"github.com/andrea20024/goferminutes2/internal/mongo"
 	"github.com/andrea20024/goferminutes2/internal/service"
+	"github.com/andrea20024/goferminutes2/internal/speech"
 	"github.com/andrea20024/goferminutes2/internal/storage"
 	"github.com/spf13/cobra"
 	mongov2 "go.mongodb.org/mongo-driver/v2/mongo"
@@ -27,6 +29,38 @@ var (
 	version   = "dev"
 	buildDate = "unknown"
 )
+
+// createSpeechClient creates a speech client based on config.
+func createSpeechClient(cfg *config.Config) speech.SpeechClient {
+	switch cfg.SpeechProvider {
+	case "salute":
+		if logger.Sugar() != nil {
+			logger.Sugar().Infow("using SaluteSpeech client", "component", "speech")
+		}
+		return speech.NewSaluteSpeechClient(cfg.SaluteSpeechAPIKey)
+	default:
+		if logger.Sugar() != nil {
+			logger.Sugar().Infow("using mock speech client", "component", "speech")
+		}
+		return speech.NewMockSpeechClient()
+	}
+}
+
+// createLLMClient creates an LLM client based on config.
+func createLLMClient(cfg *config.Config) ai.LLMClient {
+	switch cfg.LLMProvider {
+	case "gigachat":
+		if logger.Sugar() != nil {
+			logger.Sugar().Infow("using GigaChat client", "component", "ai")
+		}
+		return ai.NewGigaChatClient(cfg.GigaChatAPIKey)
+	default:
+		if logger.Sugar() != nil {
+			logger.Sugar().Infow("using mock LLM client", "component", "ai")
+		}
+		return ai.NewMockLLMClient()
+	}
+}
 
 func main() {
 	// Initialize logger
@@ -46,7 +80,7 @@ func main() {
 	}
 
 	// Set the handlers factory before creating commands
-	cli.SetHandlersFactory(func(cfg *config.Config) (*service.Handlers, error) {
+	cli.SetHandlersFactory(func(cfg *config.Config) (*cli.Handlers, error) {
 		return initApp(cfg)
 	})
 
@@ -105,12 +139,13 @@ var (
 	globalDB          *sql.DB
 	globalRepo        *storage.Repository
 	globalService     *service.MeetingService
+	globalHandlers    *cli.Handlers
 	globalMongoClient *mongov2.Client
 )
 
-func initApp(cfg *config.Config) (*service.Handlers, error) {
+func initApp(cfg *config.Config) (*cli.Handlers, error) {
 	if globalService != nil {
-		return service.GetHandlers(), nil
+		return globalHandlers, nil
 	}
 
 	ctx := context.Background()
@@ -140,8 +175,8 @@ func initApp(cfg *config.Config) (*service.Handlers, error) {
 	}
 
 	// Create external clients
-	speechClient := service.CreateSpeechClient(cfg)
-	llmClient := service.CreateLLMClient(cfg)
+	speechClient := createSpeechClient(cfg)
+	llmClient := createLLMClient(cfg)
 
 	// Connect to MongoDB for GridFS (optional)
 	var gridFSClient *mongo.GridFSClient
@@ -179,14 +214,14 @@ func initApp(cfg *config.Config) (*service.Handlers, error) {
 	}
 	globalService = meetingService
 
-	// Create and store handlers
-	h := &service.Handlers{
+	// Create handlers
+	h := &cli.Handlers{
 		Service:    meetingService,
 		UserRepo:   userRepo,
 		Repository: globalRepo,
 		GridFS:     gridFSClient,
 	}
-	service.SetHandlers(h)
+	globalHandlers = h
 
 	return h, nil
 }

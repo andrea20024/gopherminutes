@@ -123,9 +123,14 @@ func (c *GridFSClient) DownloadFile(ctx context.Context, fileID interface{}, des
 }
 
 // DownloadToReader downloads a file from GridFS and returns its data.
-func (c *GridFSClient) DownloadToReader(ctx context.Context, fileID interface{}) ([]byte, error) {
+func (c *GridFSClient) DownloadToReader(ctx context.Context, fileID string) ([]byte, error) {
+	objID, err := ParseGridFSID(fileID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid file ID: %w", err)
+	}
+
 	bucket := c.db.GridFSBucket(options.GridFSBucket().SetName(c.bucket))
-	stream, err := bucket.OpenDownloadStream(ctx, fileID)
+	stream, err := bucket.OpenDownloadStream(ctx, objID)
 	if err != nil {
 		return nil, fmt.Errorf("open download stream: %w", err)
 	}
@@ -140,14 +145,14 @@ func (c *GridFSClient) DownloadToReader(ctx context.Context, fileID interface{})
 }
 
 // DeleteFile removes a file from GridFS by ID.
-func (c *GridFSClient) DeleteFile(ctx context.Context, fileID interface{}) error {
-	oid, ok := fileID.(bson.ObjectID)
-	if !ok {
-		return fmt.Errorf("invalid file ID type, expected ObjectID")
+func (c *GridFSClient) DeleteFile(ctx context.Context, fileID string) error {
+	objID, err := ParseGridFSID(fileID)
+	if err != nil {
+		return fmt.Errorf("invalid file ID: %w", err)
 	}
 
 	coll := c.db.Collection(c.bucket + ".files")
-	_, err := coll.DeleteOne(ctx, bson.M{"_id": oid})
+	_, err = coll.DeleteOne(ctx, bson.M{"_id": objID})
 	if err != nil {
 		return fmt.Errorf("delete file: %w", err)
 	}
@@ -164,14 +169,14 @@ func ParseGridFSID(raw string) (bson.ObjectID, error) {
 }
 
 // FileExists checks if a file exists in GridFS by ID.
-func (c *GridFSClient) FileExists(ctx context.Context, fileID interface{}) bool {
-	oid, ok := fileID.(bson.ObjectID)
-	if !ok {
+func (c *GridFSClient) FileExists(ctx context.Context, fileID string) bool {
+	objID, err := ParseGridFSID(fileID)
+	if err != nil {
 		return false
 	}
 
 	coll := c.db.Collection(c.bucket + ".files")
-	count, err := coll.CountDocuments(ctx, bson.M{"_id": oid})
+	count, err := coll.CountDocuments(ctx, bson.M{"_id": objID})
 	if err != nil {
 		return false
 	}

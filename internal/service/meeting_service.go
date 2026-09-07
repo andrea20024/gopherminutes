@@ -12,33 +12,18 @@ import (
 	"time"
 
 	"github.com/andrea20024/goferminutes2/internal/ai"
-	"github.com/andrea20024/goferminutes2/internal/config"
-	"github.com/andrea20024/goferminutes2/internal/interfaces"
 	"github.com/andrea20024/goferminutes2/internal/logger"
-	"github.com/andrea20024/goferminutes2/internal/mongo"
 	"github.com/andrea20024/goferminutes2/internal/speech"
 	"github.com/andrea20024/goferminutes2/internal/storage"
 	"golang.org/x/sync/errgroup"
 )
 
-// Handlers holds all dependencies for CLI commands.
-type Handlers struct {
-	Service    *MeetingService
-	UserRepo   *storage.UserRepo
-	Repository *storage.Repository
-	GridFS     *mongo.GridFSClient
-}
-
-var globalHandlers *Handlers
-
-// SetHandlers sets the global handlers instance.
-func SetHandlers(h *Handlers) {
-	globalHandlers = h
-}
-
-// GetHandlers returns the global handlers instance.
-func GetHandlers() *Handlers {
-	return globalHandlers
+// GridFSStore defines the interface for GridFS storage operations.
+type GridFSStore interface {
+	UploadFile(ctx context.Context, filePath string) (interface{}, error)
+	DownloadToReader(ctx context.Context, fileID string) ([]byte, error)
+	DeleteFile(ctx context.Context, fileID string) error
+	FileExists(ctx context.Context, fileID string) bool
 }
 
 // TaskContext holds data for a background processing task.
@@ -69,13 +54,13 @@ type MeetingRepository interface {
 
 // MeetingService orchestrates meeting processing: transcription, summarization.
 type MeetingService struct {
-	mu          sync.Mutex
-	stopped     atomic.Bool
-	meetingRepo MeetingRepository
-	userRepo    *storage.UserRepo
-	speechClient interfaces.SpeechClient
-	llmClient    interfaces.LLMClient
-	gridFS       *mongo.GridFSClient
+	mu           sync.Mutex
+	stopped      atomic.Bool
+	meetingRepo  MeetingRepository
+	userRepo     *storage.UserRepo
+	speechClient speech.SpeechClient
+	llmClient    ai.LLMClient
+	gridFS       GridFSStore
 	taskQueue    chan *TaskContext
 	eg           *errgroup.Group
 	egCtx        context.Context
@@ -88,9 +73,9 @@ type MeetingService struct {
 func NewMeetingService(
 	meetingRepo MeetingRepository,
 	userRepo *storage.UserRepo,
-	speechClient interfaces.SpeechClient,
-	llmClient interfaces.LLMClient,
-	gridFS *mongo.GridFSClient,
+	speechClient speech.SpeechClient,
+	llmClient ai.LLMClient,
+	gridFS GridFSStore,
 	opts ...func(*MeetingService) error,
 ) (*MeetingService, error) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -383,12 +368,7 @@ func (s *MeetingService) RetryProcessing(ctx context.Context, meetingID, userID 
 	var fileData []byte
 	var fileMIME string
 	if s.gridFS != nil && meeting.GridFSID != nil {
-		gridfsID, err := mongo.ParseGridFSID(*meeting.GridFSID)
-		if err != nil {
-			return nil, fmt.Errorf("%w: invalid GridFS ID format", ErrGridFSFileNotFound)
-		}
-
-		data, err := s.gridFS.DownloadToReader(ctx, gridfsID)
+		data, err := s.gridFS.DownloadToReader(ctx, *meeting.GridFSID)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrGridFSFileNotFound, err)
 		}
@@ -444,38 +424,6 @@ func (s *MeetingService) Stop() {
 
 	if logger.Sugar() != nil {
 		logger.Sugar().Infow("meeting service stopped")
-	}
-}
-
-// CreateSpeechClient creates a speech client based on config.
-func CreateSpeechClient(cfg *config.Config) interfaces.SpeechClient {
-	switch cfg.SpeechProvider {
-	case "salute":
-		if logger.Sugar() != nil {
-			logger.Sugar().Infow("using SaluteSpeech client", "component", "speech")
-		}
-		return NewSaluteSpeechClient(cfg.SaluteSpeechAPIKey)
-	default:
-		if logger.Sugar() != nil {
-			logger.Sugar().Infow("using mock speech client", "component", "speech")
-		}
-		return speech.NewMockSpeechClient()
-	}
-}
-
-// CreateLLMClient creates an LLM client based on config.
-func CreateLLMClient(cfg *config.Config) interfaces.LLMClient {
-	switch cfg.LLMProvider {
-	case "gigachat":
-		if logger.Sugar() != nil {
-			logger.Sugar().Infow("using GigaChat client", "component", "ai")
-		}
-		return NewGigaChatClient(cfg.GigaChatAPIKey)
-	default:
-		if logger.Sugar() != nil {
-			logger.Sugar().Infow("using mock LLM client", "component", "ai")
-		}
-		return ai.NewMockLLMClient()
 	}
 }
 

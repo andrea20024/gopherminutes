@@ -3,8 +3,20 @@ package ai
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"time"
 )
+
+// LLMClient defines the interface for LLM-based text processing.
+// Implementations can be real (GigaChat) or mock for testing.
+type LLMClient interface {
+	// GetSummary generates a brief summary of the given text.
+	GetSummary(ctx context.Context, text string) (string, error)
+
+	// Ask answers a question based on the given context (transcription text).
+	Ask(ctx context.Context, question string, contextText string) (string, error)
+}
 
 // MockLLMClient returns hardcoded summary and answers for testing.
 type MockLLMClient struct {
@@ -45,10 +57,7 @@ func (m *MockLLMClient) Ask(ctx context.Context, question string, contextText st
 }
 
 // Compile-time interface check.
-var _ interface {
-	GetSummary(ctx context.Context, text string) (string, error)
-	Ask(ctx context.Context, question string, contextText string) (string, error)
-} = (*MockLLMClient)(nil)
+var _ LLMClient = (*MockLLMClient)(nil)
 
 // SlowMockLLMClient returns responses after a configurable delay.
 // Useful for testing context cancellation and timeout behavior.
@@ -94,7 +103,28 @@ func (m *SlowMockLLMClient) Ask(ctx context.Context, question string, contextTex
 }
 
 // Compile-time interface check.
-var _ interface {
-	GetSummary(ctx context.Context, text string) (string, error)
-	Ask(ctx context.Context, question string, contextText string) (string, error)
-} = (*SlowMockLLMClient)(nil)
+var _ LLMClient = (*SlowMockLLMClient)(nil)
+
+// GigaChatClient implements LLMClient for GigaChat API.
+type GigaChatClient struct {
+	apiKey string
+	client *http.Client
+}
+
+// NewGigaChatClient creates a new GigaChatClient.
+func NewGigaChatClient(apiKey string) *GigaChatClient {
+	return &GigaChatClient{
+		apiKey: apiKey,
+		client: &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+// GetSummary generates a summary via GigaChat API.
+func (c *GigaChatClient) GetSummary(ctx context.Context, text string) (string, error) {
+	return "", fmt.Errorf("GigaChat integration not yet implemented")
+}
+
+// Ask answers a question via GigaChat API.
+func (c *GigaChatClient) Ask(ctx context.Context, question string, contextText string) (string, error) {
+	return "", fmt.Errorf("GigaChat integration not yet implemented")
+}

@@ -2,55 +2,9 @@
 package service
 
 import (
-	"context"
 	"fmt"
-	"net/http"
 	"path/filepath"
-	"time"
 )
-
-// SaluteSpeechClient implements SpeechClient for SaluteSpeech API.
-type SaluteSpeechClient struct {
-	apiKey string
-	client *http.Client
-}
-
-// NewSaluteSpeechClient creates a new SaluteSpeechClient.
-func NewSaluteSpeechClient(apiKey string) *SaluteSpeechClient {
-	return &SaluteSpeechClient{
-		apiKey: apiKey,
-		client: &http.Client{Timeout: 30 * time.Second},
-	}
-}
-
-// Recognize transcribes audio via SaluteSpeech API.
-func (c *SaluteSpeechClient) Recognize(ctx context.Context, data []byte, mime string) (string, error) {
-	return "", fmt.Errorf("SaluteSpeech integration not yet implemented")
-}
-
-// GigaChatClient implements LLMClient for GigaChat API.
-type GigaChatClient struct {
-	apiKey string
-	client *http.Client
-}
-
-// NewGigaChatClient creates a new GigaChatClient.
-func NewGigaChatClient(apiKey string) *GigaChatClient {
-	return &GigaChatClient{
-		apiKey: apiKey,
-		client: &http.Client{Timeout: 30 * time.Second},
-	}
-}
-
-// GetSummary generates a summary via GigaChat API.
-func (c *GigaChatClient) GetSummary(ctx context.Context, text string) (string, error) {
-	return "", fmt.Errorf("GigaChat integration not yet implemented")
-}
-
-// Ask answers a question via GigaChat API.
-func (c *GigaChatClient) Ask(ctx context.Context, question string, contextText string) (string, error) {
-	return "", fmt.Errorf("GigaChat integration not yet implemented")
-}
 
 // GetMIMEType returns the MIME type for a file extension.
 func GetMIMEType(ext string) string {
