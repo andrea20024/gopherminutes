@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/andrea20024/goferminutes2/internal/ai"
@@ -69,6 +70,7 @@ type MeetingRepository interface {
 // MeetingService orchestrates meeting processing: transcription, summarization.
 type MeetingService struct {
 	mu          sync.Mutex
+	stopped     atomic.Bool
 	meetingRepo MeetingRepository
 	userRepo    *storage.UserRepo
 	speechClient interfaces.SpeechClient
@@ -304,6 +306,9 @@ func (s *MeetingService) StartProcessing(ctx context.Context, userID int, filePa
 	}
 
 	// Check if service is stopped to prevent panic on closed channel
+	if s.stopped.Load() {
+		return nil, nil, ErrServiceShuttingDown
+	}
 	s.mu.Lock()
 	select {
 	case s.taskQueue <- taskCtx:
@@ -406,6 +411,9 @@ func (s *MeetingService) RetryProcessing(ctx context.Context, meetingID, userID 
 	}
 
 	// Check if service is stopped to prevent panic on closed channel
+	if s.stopped.Load() {
+		return nil, ErrServiceShuttingDown
+	}
 	s.mu.Lock()
 	select {
 	case s.taskQueue <- taskCtx:
@@ -424,6 +432,8 @@ func (s *MeetingService) Stop() {
 	}
 
 	// Close the queue to stop consumeLoop
+	// Mark as stopped before closing the queue to prevent new sends.
+	s.stopped.Store(true)
 	close(s.taskQueue)
 
 	// Cancel context to signal all in-flight tasks
