@@ -56,6 +56,7 @@ type MeetingRepository interface {
 type MeetingService struct {
 	mu           sync.Mutex
 	stopped      atomic.Bool
+	once         sync.Once
 	meetingRepo  MeetingRepository
 	userRepo     *storage.UserRepo
 	speechClient speech.SpeechClient
@@ -406,25 +407,28 @@ func (s *MeetingService) RetryProcessing(ctx context.Context, meetingID, userID 
 }
 
 // Stop gracefully shuts down the service.
+// Safe to call multiple times — only executes once.
 func (s *MeetingService) Stop() {
-	if logger.Sugar() != nil {
-		logger.Sugar().Infow("stopping meeting service")
-	}
+	s.once.Do(func() {
+		if logger.Sugar() != nil {
+			logger.Sugar().Infow("stopping meeting service")
+		}
 
-	// Close the queue to stop consumeLoop
-	// Mark as stopped before closing the queue to prevent new sends.
-	s.stopped.Store(true)
-	close(s.taskQueue)
+		// Close the queue to stop consumeLoop
+		// Mark as stopped before closing the queue to prevent new sends.
+		s.stopped.Store(true)
+		close(s.taskQueue)
 
-	// Cancel context to signal all in-flight tasks
-	s.egCancel()
+		// Cancel context to signal all in-flight tasks
+		s.egCancel()
 
-	// Wait for all goroutines to finish
-	_ = s.eg.Wait()
+		// Wait for all goroutines to finish
+		_ = s.eg.Wait()
 
-	if logger.Sugar() != nil {
-		logger.Sugar().Infow("meeting service stopped")
-	}
+		if logger.Sugar() != nil {
+			logger.Sugar().Infow("meeting service stopped")
+		}
+	})
 }
 
 // WithWorkers sets the max number of concurrent processing workers.

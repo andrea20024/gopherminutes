@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -95,26 +96,16 @@ func main() {
 	// Register commands (no DB connection yet - lazy init)
 	cli.RegisterCommands(rootCmd, cfg)
 
-	// Channel for graceful shutdown signal
-	shutdownCh := make(chan struct{})
+	// Handle graceful shutdown with sync.Once to prevent double-cleanup panic
+	var shutdownOnce sync.Once
 
-	// Handle graceful shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		sig := <-sigCh
 		sugar.Infow("signal received", "signal", sig)
-		if globalService != nil {
-			globalService.Stop()
-		}
-		if globalMongoClient != nil {
-			_ = globalMongoClient.Disconnect(context.Background())
-		}
-		if globalDB != nil {
-			_ = globalDB.Close()
-		}
-		close(shutdownCh)
+		shutdownOnce.Do(doShutdown)
 	}()
 
 	// Execute command
@@ -124,14 +115,36 @@ func main() {
 	}
 
 	// Graceful shutdown: stop service, disconnect MongoDB, close DB
+	shutdownOnce.Do(doShutdown)
+}
+
+// doShutdown performs the actual graceful shutdown.
+// Called via sync.Once to ensure it runs exactly once.
+func doShutdown() {
+	sugar := logger.Sugar()
+	if sugar != nil {
+		sugar.Infow("performing graceful shutdown", "component", "main")
+	}
+
+	// Stop accepting new tasks and wait for in-progress tasks
 	if globalService != nil {
 		globalService.Stop()
 	}
+
+	// Disconnect MongoDB with timeout to prevent hanging shutdown
 	if globalMongoClient != nil {
-		_ = globalMongoClient.Disconnect(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = globalMongoClient.Disconnect(ctx)
 	}
+
+	// Close PostgreSQL connection
 	if globalDB != nil {
 		_ = globalDB.Close()
+	}
+
+	if sugar != nil {
+		sugar.Infow("graceful shutdown completed", "component", "main")
 	}
 }
 

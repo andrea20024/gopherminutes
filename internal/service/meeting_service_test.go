@@ -523,3 +523,25 @@ func TestNewMeetingService_ValidOptions(t *testing.T) {
 		t.Errorf("expected task timeout 30s, got %v", svc.taskTimeout)
 	}
 }
+
+// TestMeetingService_DoubleStop verifies that calling Stop() twice is safe.
+// Previously this caused: panic: close of closed channel
+func TestMeetingService_DoubleStop(t *testing.T) {
+	mockRepo := NewMockMeetingRepo()
+	speechClient := speech.NewMockSpeechClient()
+	llmClient := ai.NewMockLLMClient()
+
+	svc, err := NewMeetingService(mockRepo, nil, speechClient, llmClient, nil)
+	if err != nil {
+		t.Fatalf("failed to create service: %v", err)
+	}
+
+	// First Stop should succeed
+	svc.Stop()
+
+	// Second Stop should also succeed (no panic)
+	svc.Stop()
+
+	// Third Stop should also succeed (idempotent)
+	svc.Stop()
+}
