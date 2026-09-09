@@ -177,6 +177,11 @@ func (s *MeetingService) runTask(task *TaskContext) {
 		return
 	}
 
+	if err := s.meetingRepo.UpdateMeetingStatus(ctx, task.MeetingID, storage.StatusTranscribed, nil); err != nil {
+		s.failTask(ctx, task, fmt.Sprintf("update status to transcribed: %v", err))
+		return
+	}
+
 	if logger.Sugar() != nil {
 		logger.Sugar().Infow("transcription saved", "meeting_id", task.MeetingID)
 	}
@@ -200,6 +205,11 @@ func (s *MeetingService) runTask(task *TaskContext) {
 
 	if err := s.meetingRepo.SaveSummary(ctx, task.MeetingID, summary); err != nil {
 		s.failTask(ctx, task, fmt.Sprintf("save summary: %v", err))
+		return
+	}
+
+	if err := s.meetingRepo.UpdateMeetingStatus(ctx, task.MeetingID, storage.StatusSummarized, nil); err != nil {
+		s.failTask(ctx, task, fmt.Sprintf("update status to summarized: %v", err))
 		return
 	}
 

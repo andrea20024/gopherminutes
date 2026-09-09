@@ -34,7 +34,6 @@ CLI (Cobra) ──→ MeetingService ──→ SpeechClient / LLMClient (mock)
 | CLI | `cmd/cli` | Cobra-команды, адаптеры |
 | Service | `internal/service` | Бизнес-логика, async pipeline |
 | Storage | `internal/storage` | Repository-слой (PostgreSQL) |
-| Interfaces | `internal/interfaces` | SpeechClient, LLMClient |
 | Speech | `internal/speech` | Mock + реальная реализация |
 | AI | `internal/ai` | Mock + реальная реализация |
 | Config | `internal/config` | Загрузка .env |
@@ -45,7 +44,7 @@ CLI (Cobra) ──→ MeetingService ──→ SpeechClient / LLMClient (mock)
 
 ### Требования
 
-- Go 1.21+
+- Go 1.25+
 - PostgreSQL 14+
 - MongoDB 6.0+ (опционально, для GridFS)
 
@@ -175,8 +174,8 @@ created → processing → transcribed → summarized → completed
 |--------|----------|
 | `created` | Встреча создана, обработка не начата |
 | `processing` | Идёт распознавание речи |
-| `transcribed` | Транскрипция готова |
-| `summarized` | Summary сгенерирована |
+| `transcribed` | Транскрипция получена |
+| `summarized` | Краткая выжимка получена |
 | `completed` | Обработка завершена |
 | `failed` | Ошибка обработки (доступен retry) |
 
@@ -221,7 +220,7 @@ users (1) ──< meetings (N) ──< meeting_tasks (N)
 | 0001 | `0001_init.up.sql` | Создание таблиц: users, meetings, meeting_tasks |
 | 0002 | `0002_add_fts_indexes.up.sql` | GIN-индексы для полнотекстового поиска |
 | 0003 | `0003_remove_meeting_status.up.sql` | Удаление status из meetings (перенос в meeting_tasks) |
-| 0004 | `0004_remove_meeting_error_message.up.sql` | Удаление error_message из meetings (перенос в meeting_tasks) |
+| 0005 | `0005_remove_meeting_error_message.up.sql` | Удаление error_message из meetings (перенос в meeting_tasks) |
 
 ## Тесты
 
@@ -297,7 +296,7 @@ type SpeechClient interface {
 }
 
 type LLMClient interface {
-    Summarize(ctx context.Context, transcription string) (string, error)
+    GetSummary(ctx context.Context, text string) (string, error)
     Ask(ctx context.Context, question string, contextText string) (string, error)
 }
 ```
@@ -325,15 +324,11 @@ internal/
 ├── cli/                     ← Cobra commands (start, load, list, ...)
 ├── service/                 ← Business logic (MeetingService)
 ├── storage/                 ← Repository layer (PostgreSQL)
-├── interfaces/              ← SpeechClient, LLMClient interfaces
 ├── speech/                  ← Speech client implementations
 ├── ai/                      ← LLM client implementations
 ├── config/                  ← .env configuration
 ├── logger/                  ← Structured logging (zap)
-├── mongo/                   ← MongoDB GridFS client
-├── model/                   ← Data models
-├── queue/                   ← Task queue (channel + semaphore)
-└── handler/                 ← HTTP handlers (if needed)
+└── mongo/                   ← MongoDB GridFS client
 migrations/                  ← SQL migrations (goose format)
 .env.example                 ← Configuration template
 ```
