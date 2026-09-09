@@ -11,7 +11,7 @@ CLI-утилита для записи, обработки и поиска ма�
 - 🔄 **Retry** — повторная обработка failed-встреч
 - 🗑 **Delete** — удаление встреч с каскадным удалением задач
 - 💬 **Chat** — вопросы по материалам встреч через LLM
-- ⚡ **Асинхронная обработка** — bounded concurrency (channel + semaphore, 3 workers)
+- ⚡ **Асинхронная обработка** — bounded concurrency (channel + errgroup, 3 workers)
 - 🛡 **Graceful shutdown** — корректное завершение по SIGINT/SIGTERM
 - 📝 **Structured logging** — zap logger с ключевыми событиями
 
@@ -230,7 +230,7 @@ users (1) ──< meetings (N) ──< meeting_tasks (N)
 go test ./internal/service/... ./internal/cli/...
 ```
 
-**Покрытие:** 100% бизнес-логики через MockMeetingRepo.
+**Покрытие:** бизнес-логика (MeetingService) через MockMeetingRepo + CLI (formatError) через unit-тесты.
 
 ### Интеграционные тесты
 
@@ -252,40 +252,40 @@ go test ./internal/storage/... -tags integration
 ### Тесты конкурентности
 
 ```bash
-go test ./internal/service/... -tags unit -run "Concurrent|Semaphore|Graceful|Context"
+go test ./internal/service/... -run "Concurrent|ThreadSafety|DoubleStop"
 ```
 
 **Тесты:**
 - `ConcurrentAccess` — 10 goroutines concurrently
-- `SemaphoreLimit` — max 3 workers (bounded concurrency)
-- `ContextCancellation` — slow-mock, context cancelled → no side effects
-- `GracefulShutdown_NoGoroutineLeak` — корректное завершение
-- `ShutdownStopsAcceptingTasks` — stop accepting + drain
+- `ThreadSafety` — race detection на MockRepo
+- `DoubleStop` — корректное завершение (sync.Once)
 
 ### Тесты обработки ошибок
 
 ```bash
-go test ./internal/service/... -tags unit -run "SpeechClientError|LLMClientError|Retry"
+go test ./internal/service/... -run "CustomErrors|Retry|formatError"
 ```
 
 **Тесты:**
-- Speech client error → status=failed
-- LLM client error → status=failed after transcription
-- Successful retry of failed meeting
-- Retry rejected for non-failed meeting
-- formatError — 11 test cases
+- `TestCustomErrors_As` — SpeechClientError / LLMClientError (transient vs permanent)
+- `TestCustomErrors_Is` — errors.Is для wrapped errors
+- `TestMeetingService_RejectCompletedMeetingRetry` — retry rejected for non-failed meeting
+- `TestFormatError_AllCases` — 11 test cases для formatError
+- `TestFormatError_WrappedErrors` — wrapped errors
+- `TestFormatError_SpecificErrorTypes` — specific error types
 
 ## Ключевые решения
 
-### Channel + Semaphore (bounded concurrency)
+### Channel + Bounded concurrency (errgroup)
 
 ```go
 taskQueue := make(chan *TaskContext, 100)
-sem := make(chan struct{}, 3) // max 3 workers
+eg, ctx := errgroup.WithContext(ctx)
+eg.SetLimit(3) // max 3 concurrent workers
 ```
 
 - Очередь задач (capacity 100) — не блокирует CLI при загрузке
-- Semaphore — ограничивает 3 параллельных worker'а
+- `errgroup.SetLimit(3)` — ограничивает 3 параллельных worker'а
 - Graceful shutdown: stop accepting → drain queue → close
 
 ### Mock-клиенты
@@ -302,12 +302,12 @@ type LLMClient interface {
 ```
 
 - Mock-реализации работают без внешних API
-- SlowMock — для тестов cancellation/timeout
-- CountingMock — для проверки semaphore (max concurrent calls)
+- SlowMockSpeechClient / SlowMockLLMClient — для тестов cancellation/timeout
+- CountingSpeechClient — для проверки concurrency (max concurrent calls)
 
 ### Lazy DB init
 
-CLI не падает без PostgreSQL — подключение происходит при первой команде, требующей БД.
+CLI не падает без PostgreSQL — подключение происходит при первой команде, требующей подключения к БД.
 
 ### Status в meeting_tasks
 
