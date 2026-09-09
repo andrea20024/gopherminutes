@@ -25,6 +25,11 @@ func TestMain(m *testing.M) {
 	}
 	defer testDB.Close()
 
+	// Reset sequences to avoid duplicate key errors from previous runs
+	testDB.Exec("ALTER SEQUENCE users_id_seq RESTART WITH 1")
+	testDB.Exec("ALTER SEQUENCE meetings_id_seq RESTART WITH 1")
+	testDB.Exec("ALTER SEQUENCE meeting_tasks_id_seq RESTART WITH 1")
+
 	code := m.Run()
 	os.Exit(code)
 }
@@ -41,6 +46,9 @@ func setupIntegrationTest(t *testing.T) (*UserRepo, *MeetingRepo, func()) {
 		testDB.ExecContext(ctx, "DELETE FROM meeting_tasks")
 		testDB.ExecContext(ctx, "DELETE FROM meetings")
 		testDB.ExecContext(ctx, "DELETE FROM users")
+		testDB.ExecContext(ctx, "ALTER SEQUENCE users_id_seq RESTART WITH 1")
+		testDB.ExecContext(ctx, "ALTER SEQUENCE meetings_id_seq RESTART WITH 1")
+		testDB.ExecContext(ctx, "ALTER SEQUENCE meeting_tasks_id_seq RESTART WITH 1")
 	}
 
 	return userRepo, meetingRepo, cleanup
@@ -54,7 +62,7 @@ func TestIntegration_CreateMeetingWithTask(t *testing.T) {
 	userRepo, meetingRepo, cleanup := setupIntegrationTest(t)
 	defer cleanup()
 
-	user, err := userRepo.CreateUser(context.Background(), 100, "testuser")
+	user, err := userRepo.CreateUser(context.Background(), 600, "testuser")
 	if err != nil {
 		t.Fatalf("CreateUser failed: %v", err)
 	}

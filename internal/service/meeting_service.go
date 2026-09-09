@@ -122,22 +122,14 @@ func NewMeetingService(
 
 // consumeLoop reads tasks from the queue and dispatches them via errgroup.
 func (s *MeetingService) consumeLoop() {
-	for {
-		select {
-		case task, ok := <-s.taskQueue:
-			if !ok {
-				return
-			}
-			// errgroup.Go blocks when the concurrency limit is reached,
-			// replacing the manual semaphore.
-			taskCtx := task // capture for closure
-			s.eg.Go(func() error {
-				s.runTask(taskCtx)
-				return nil
-			})
-		case <-s.egCtx.Done():
-			return
-		}
+	for task := range s.taskQueue {
+		// errgroup.Go blocks when the concurrency limit is reached,
+		// replacing the manual semaphore.
+		taskCtx := task // capture for closure
+		s.eg.Go(func() error {
+			s.runTask(taskCtx)
+			return nil
+		})
 	}
 }
 
@@ -419,11 +411,11 @@ func (s *MeetingService) Stop() {
 		s.stopped.Store(true)
 		close(s.taskQueue)
 
-		// Cancel context to signal all in-flight tasks
-		s.egCancel()
-
-		// Wait for all goroutines to finish
+		// Wait for all goroutines to finish processing remaining tasks
 		_ = s.eg.Wait()
+
+		// Cancel context after all tasks complete
+		s.egCancel()
 
 		if logger.Sugar() != nil {
 			logger.Sugar().Infow("meeting service stopped")
