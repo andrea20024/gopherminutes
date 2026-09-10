@@ -445,9 +445,16 @@ func deleteCmd(cfg *config.Config) *cobra.Command {
 			}
 
 			// Verify the meeting exists and belongs to the user
-			_, err = h.Service.GetMeeting(cmd.Context(), meetingID, userID)
+			meeting, err := h.Service.GetMeeting(cmd.Context(), meetingID, userID)
 			if err != nil {
 				return formatError(err)
+			}
+
+			// Delete audio file from GridFS if it exists
+			if h.GridFS != nil && meeting.GridFSID != nil {
+				if err := h.GridFS.DeleteFile(cmd.Context(), *meeting.GridFSID); err != nil {
+					return fmt.Errorf("delete gridfs file: %w", err)
+				}
 			}
 
 			// Delete meeting (cascading delete handled by database FK constraints)

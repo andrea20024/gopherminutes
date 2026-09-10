@@ -144,16 +144,15 @@ func (c *GridFSClient) DownloadToReader(ctx context.Context, fileID string) ([]b
 	return data, nil
 }
 
-// DeleteFile removes a file from GridFS by ID.
+// DeleteFile removes a file and all its chunks from GridFS by ID.
 func (c *GridFSClient) DeleteFile(ctx context.Context, fileID string) error {
 	objID, err := ParseGridFSID(fileID)
 	if err != nil {
 		return fmt.Errorf("invalid file ID: %w", err)
 	}
 
-	coll := c.db.Collection(c.bucket + ".files")
-	_, err = coll.DeleteOne(ctx, bson.M{"_id": objID})
-	if err != nil {
+	bucket := c.db.GridFSBucket(options.GridFSBucket().SetName(c.bucket))
+	if err := bucket.Delete(ctx, objID); err != nil {
 		return fmt.Errorf("delete file: %w", err)
 	}
 
